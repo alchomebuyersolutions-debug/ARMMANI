@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.youtube.com)",
+      "Bash(pip3 install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(\"/Users/angellatorre/gravity-claw/node_modules/.bin/tsc\":*)",
+      "Bash(\"/Users/angellatorre/gravity-claw/node_modules/.bin/tsc\" --noEmit --project \"/Users/angellatorre/gravity-claw/tsconfig.json\")",
+      "Bash(pbcopy:*)",
+      "Bash(for f in ~/Desktop/Screenshot 2026-02-25*.png)",
+      "Bash(do cp \"$f\" \"/Users/angellatorre/Reddit Scrapper /strategies/sunday-open-screenshots/\")",
+      "Bash(done)",
+      "WebFetch(domain:www.tradingview.com)"
+    ]
+  }
+}

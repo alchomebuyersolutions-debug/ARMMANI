@@ -1,0 +1,17 @@
+{
+  "youtube": false,
+  "twitter": true,
+  "discord": true,
+  "meta": false,
+  "instagram": true,
+  "twitch": true,
+  "tiktok": true,
+  "telegram": true,
+  "whatsapp": false,
+  "reddit": true,
+  "customWebhook": true,
+  "blofin": false,
+  "mt5": false,
+  "alphaWik": false,
+  "alphaBit": false
+}

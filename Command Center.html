@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Command Center Launcher</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #0d2b4a 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .logo {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto 30px;
+            background: url('data:image/svg+xml;utf8,<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="auroraGreen" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:%2300ff88;stop-opacity:1" /><stop offset="100%" style="stop-color:%2300ccff;stop-opacity:1" /></linearGradient></defs><circle cx="128" cy="128" r="128" fill="%231a1a3e"/><circle cx="128" cy="128" r="120" fill="none" stroke="url(%23auroraGreen)" stroke-width="3" opacity="0.7"/><g transform="translate(128, 128)"><path d="M 0,-40 L 35,-20 L 35,20 L 0,40 L -35,20 L -35,-20 Z" fill="none" stroke="url(%23auroraGreen)" stroke-width="3"/><circle cx="0" cy="0" r="8" fill="url(%23auroraGreen)"/></g></svg>') no-repeat center;
+            background-size: contain;
+        }
+        
+        h1 {
+            color: #00ff88;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px rgba(0, 255, 136, 0.6);
+        }
+        
+        p {
+            color: #00ffdd;
+            font-size: 1.1em;
+            margin-bottom: 40px;
+            text-shadow: 0 0 10px rgba(0, 255, 221, 0.4);
+        }
+        
+        .button {
+            display: inline-block;
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #00ff88 0%, #00ffdd 100%);
+            color: #0a0e27;
+            text-decoration: none;
+            border-radius: 50px;
+            font-weight: bold;
+            font-size: 1.1em;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+        }
+        
+        .button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(0, 255, 136, 0.8);
+        }
+        
+        .button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo"></div>
+        <h1>🌌 Command Center</h1>
+        <p>Aurora Borealis Trading Command Center</p>
+        <button class="button" onclick="launchCommandCenter()">
+            🚀 Launch Command Center
+        </button>
+    </div>
+    
+    <script>
+        function launchCommandCenter() {
+            // Try to open the server
+            fetch('http://localhost:3000')
+                .then(() => {
+                    // If server responds, open it
+                    window.location.href = 'http://localhost:3000';
+                })
+                .catch(() => {
+                    // If server not running, show message
+                    alert('Starting Command Center server...\nPlease wait a moment and try again.');
+                    // Try to start the server via shell
+                    fetch('/api/start-server', { method: 'POST' });
+                    setTimeout(() => {
+                        window.location.href = 'http://localhost:3000';
+                    }, 3000);
+                });
+        }
+        
+        // Auto-launch on page load
+        setTimeout(() => {
+            launchCommandCenter();
+        }, 500);
+    </script>
+</body>
+</html>

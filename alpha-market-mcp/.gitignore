@@ -1,0 +1,22 @@
+# Secrets — NEVER commit
+.env
+.env.*
+config.json
+secrets.json
+credentials.json
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.js.map
+*.d.ts.map
+
+# Logs
+*.log
+webhook_logs.txt
+
+# OS
+.DS_Store
+Thumbs.db

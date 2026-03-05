@@ -1,0 +1,3 @@
+# .tmp — Workbench (ephemeral)
+# Files in this directory are intermediates. Safe to delete at any time.
+*.log

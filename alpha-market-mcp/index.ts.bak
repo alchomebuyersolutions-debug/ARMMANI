@@ -1,0 +1,936 @@
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+    CallToolRequestSchema,
+    ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import { ApifyClient } from "apify-client";
+import { createClient } from "@supabase/supabase-js";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const MetaApi = require('metaapi.cloud-sdk');
+import dotenv from "dotenv";
+
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+
+// Load local .env relative to the server script if running in a different CWD
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const envPath = path.resolve(__dirname, ".env");
+
+if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+} else {
+    dotenv.config();
+}
+
+const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const METAAPI_TOKEN = process.env.METAAPI_TOKEN;
+const METAAPI_ACCOUNT_ID = process.env.METAAPI_ACCOUNT_ID;
+
+// Risk Management Constants
+const ACCOUNT_SIZE = Number(process.env.ACCOUNT_SIZE) || 50000;
+const MAX_DAILY_LOSS = Number(process.env.MAX_DAILY_LOSS) || 1000;
+const MAX_TOTAL_DRAWDOWN = Number(process.env.MAX_TOTAL_DRAWDOWN) || 4000;
+const REVENGE_TRADING_DELAY_MINS = Number(process.env.REVENGE_TRADING_DELAY_MINS) || 60;
+const NEWS_FILTER_ENABLED = process.env.NEWS_FILTER_ENABLED === 'true';
+const RISK_PER_TRADE_PERCENT = 0.005; // 0.5% as per strategy
+
+if (!APIFY_TOKEN || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("APIFY_API_TOKEN, SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY are required in the environment.");
+    process.exit(1);
+}
+
+const apifyClient = new ApifyClient({
+    token: APIFY_TOKEN,
+});
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+const metaApi = METAAPI_TOKEN ? new MetaApi.default(METAAPI_TOKEN) : null;
+const copyFactory = METAAPI_TOKEN ? new MetaApi.CopyFactory(METAAPI_TOKEN) : null;
+
+const server = new Server(
+    {
+        name: "alpha-market-mcp",
+        version: "1.0.0",
+    },
+    {
+        capabilities: {
+            tools: {},
+        },
+    }
+);
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return {
+        tools: [
+            {
+                name: "save_trade_memory",
+                description: "Saves a structured trade idea or market memory to the Supabase database. This acts as Alpha's long-term memory for strategy rules and active trades.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        topic: {
+                            type: "string",
+                            description: "The topic or ticker this memory is about (e.g., 'GOLD_STRATEGY', 'BTC_TRADE_SETUP')."
+                        },
+                        data: {
+                            type: "string",
+                            description: "The detailed knowledge to save, formatted as a JSON string."
+                        },
+                    },
+                    required: ["topic", "data"],
+                },
+            },
+            {
+                name: "get_trade_memory",
+                description: "Retrieves past trade memory or strategy rules from Supabase based on a topic.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        topic: {
+                            type: "string",
+                            description: "The topic or ticker to retrieve (e.g., 'GOLD_STRATEGY', 'BTC_TRADE_SETUP')."
+                        },
+                    },
+                    required: ["topic"],
+                },
+            },
+            {
+                name: "run_apify_scraper",
+                description: "Runs an Apify web scraper (CheerioScraper) to extract data from a specific URL. Useful for scraping market data, news, and financial information.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        url: {
+                            type: "string",
+                            description: "The URL to scrape (e.g., https://finance.yahoo.com/quote/AAPL)",
+                        },
+                        extractRules: {
+                            type: "string",
+                            description: "Optional jQuery/Cheerio extraction code to run on the page. E.g. `return { title: $('title').text() }`"
+                        }
+                    },
+                    required: ["url"],
+                },
+            },
+            {
+                name: "get_market_news",
+                description: "Uses Apify Google Search scraper to fetch the latest market news.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        query: {
+                            type: "string",
+                            description: "The market topic to search for (e.g., 'Gold price news', 'Forex USD/JPY')",
+                        },
+                    },
+                    required: ["query"],
+                },
+            },
+            {
+                name: "execute_mt5_trade",
+                description: "Executes a trade on MetaTrader 5 via the MetaApi Cloud Bridge.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        symbol: {
+                            type: "string",
+                            description: "The pair to trade (e.g., 'XAUUSD', 'EURUSD')."
+                        },
+                        action: {
+                            type: "string",
+                            enum: ["buy", "sell"],
+                            description: "Trade direction."
+                        },
+                        volume: {
+                            type: "number",
+                            description: "Position size (e.g., 0.1)."
+                        },
+                        sl: {
+                            type: "number",
+                            description: "Stop Loss price (0 for none)."
+                        },
+                        tp: {
+                            type: "number",
+                            description: "Take Profit price (0 for none)."
+                        }
+                    },
+                    required: ["symbol", "action", "volume"],
+                },
+            },
+            {
+                name: "analyze_telegram_signals",
+                description: "Scans a Telegram group for potential trading signals and returns structured data.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        chatId: {
+                            type: "string",
+                            description: "The Telegram Chat ID to scan (e.g., '@crypto_signals' or a numeric ID)."
+                        },
+                        limit: {
+                            type: "number",
+                            description: "Number of messages to scan (default 20)."
+                        }
+                    },
+                    required: ["chatId"],
+                },
+            },
+            {
+                name: "cf_create_strategy",
+                description: "Creates a new CopyFactory strategy. This represents a master/lead account that others will follow.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string",
+                            description: "A descriptive name for the strategy (e.g., 'Alpha Master Strategy')."
+                        },
+                        accountId: {
+                            type: "string",
+                            description: "The MetaApi account ID of the master account providing signals."
+                        }
+                    },
+                    required: ["name", "accountId"]
+                }
+            },
+            {
+                name: "cf_create_subscriber",
+                description: "Creates a new CopyFactory subscriber. This represents a follower account that copies a strategy.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string",
+                            description: "A descriptive name for the subscriber (e.g., 'Follower Account 1')."
+                        },
+                        accountId: {
+                            type: "string",
+                            description: "The MetaApi account ID of the follower account."
+                        }
+                    },
+                    required: ["name", "accountId"]
+                }
+            },
+            {
+                name: "cf_create_webhook",
+                description: "Creates a new CopyFactory webhook to receive external trading signals.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        strategyId: {
+                            type: "string",
+                            description: "The ID of the CopyFactory strategy to broadcast the signal to."
+                        },
+                        url: {
+                            type: "string",
+                            description: "The target URL where Webhook alerts will be pushed to or from where they are received (if it is a pull webhook)"
+                        }
+                    },
+                    required: ["strategyId", "url"]
+                }
+            },
+            {
+                name: "list_metaapi_accounts",
+                description: "Lists all linked MetaApi accounts for the current user.",
+                inputSchema: {
+                    type: "object",
+                    properties: {}
+                }
+            },
+            {
+                name: "cf_list_strategies",
+                description: "Lists all existing CopyFactory strategies.",
+                inputSchema: {
+                    type: "object",
+                    properties: {}
+                }
+            },
+            {
+                name: "cf_list_subscribers",
+                description: "Lists all existing CopyFactory subscribers.",
+                inputSchema: {
+                    type: "object",
+                    properties: {}
+                }
+            },
+            {
+                name: "send_telegram_message",
+                description: "Sends a message to the user's Telegram via the Gravity Claw bot. Use this to proactively alert, report, or communicate with the user.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        text: {
+                            type: "string",
+                            description: "The message text to send (supports Telegram MarkdownV2 formatting)."
+                        },
+                        parse_mode: {
+                            type: "string",
+                            enum: ["MarkdownV2", "HTML", ""],
+                            description: "Optional parse mode for formatting (default: no formatting)."
+                        }
+                    },
+                    required: ["text"],
+                },
+            },
+            {
+                name: "list_strategies",
+                description: "List all saved trading strategies (Pine Script, backtest scripts) from the strategy library.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                },
+            },
+            {
+                name: "get_strategy",
+                description: "Retrieve the full source code of a saved trading strategy by filename.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        filename: {
+                            type: "string",
+                            description: "The strategy filename (e.g., 'ORB_NQ_Strategy.pine', '50_Pips_A_Day_Kaspricci.pine')"
+                        }
+                    },
+                    required: ["filename"],
+                },
+            },
+            {
+                name: "save_strategy",
+                description: "Save a new trading strategy to the library. Supports .pine, .mjs, .py files.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        filename: {
+                            type: "string",
+                            description: "Filename with extension (e.g., 'MyStrategy.pine')"
+                        },
+                        content: {
+                            type: "string",
+                            description: "The full source code of the strategy"
+                        }
+                    },
+                    required: ["filename", "content"],
+                },
+            }
+        ],
+    };
+});
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === "save_trade_memory") {
+        const { topic, data } = request.params.arguments as any;
+
+        try {
+            const { error } = await supabase
+                .from("alpha_memory")
+                .insert([{ topic, data, created_at: new Date().toISOString() }]);
+
+            if (error) throw error;
+
+            return {
+                content: [{ type: "text", text: `Successfully saved memory about: ${topic}` }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error saving memory: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "get_trade_memory") {
+        const { topic } = request.params.arguments as any;
+
+        try {
+            const { data, error } = await supabase
+                .from("alpha_memory")
+                .select("*")
+                .eq("topic", topic)
+                .order("created_at", { ascending: false });
+
+            if (error) throw error;
+
+            return {
+                content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error fetching memory: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "run_apify_scraper") {
+        const { url, extractRules } = request.params.arguments as any;
+
+        // Default extraction if none provided - just get text
+        const pageFunction = extractRules
+            ? "async ({ $, request }) => { " + extractRules + " }"
+            : "async ({ $, request }) => { return { title: $('title').text(), text: $('body').text().substring(0, 5000) }; }";
+
+        try {
+            const run = await apifyClient.actor("apify/cheerio-scraper").call({
+                startUrls: [{ url }],
+                pageFunction: pageFunction,
+            });
+
+            const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify(items, null, 2),
+                    },
+                ],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error running scraper: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "get_market_news") {
+        const { query } = request.params.arguments as any;
+
+        try {
+            // Using an implicit google search actor, or a custom approach.
+            // We will use the apify/google-search-scraper actor
+            const run = await apifyClient.actor("apify/google-search-scraper").call({
+                queries: query + " news",
+                resultsPerPage: 5,
+                maxPagesPerQuery: 1,
+            });
+
+            const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+            const organicResults = (items[0] as any)?.organicResults || [];
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify(organicResults.map((i: any) => ({
+                            title: i.title,
+                            url: i.url,
+                            description: i.description
+                        })), null, 2),
+                    },
+                ],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error fetching news: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "execute_mt5_trade") {
+        const { symbol, action, volume, sl, tp } = request.params.arguments as any;
+
+        if (!metaApi || !METAAPI_ACCOUNT_ID) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "MetaApi credentials (METAAPI_TOKEN, METAAPI_ACCOUNT_ID) are missing in .env" }],
+            };
+        }
+
+        try {
+            const account = await metaApi.metatraderAccountApi.getAccount(METAAPI_ACCOUNT_ID);
+            const connection = account.getStreamingConnection();
+            await connection.connect();
+            await connection.waitSynchronized();
+
+            // ── RISK CHECK 1: Connection & Account Info State ──────
+            const terminalState = connection.terminalState;
+            if (!terminalState || !terminalState.accountInformation) {
+                return {
+                    isError: true,
+                    content: [{ type: "text", text: "RISK CHECK FAILED: Could not retrieve account information from MT5. Trade aborted." }]
+                };
+            }
+
+            const accountInfo = terminalState.accountInformation;
+            const currentEquity = accountInfo.equity;
+            const totalLoss = ACCOUNT_SIZE - currentEquity;
+
+            if (totalLoss >= MAX_TOTAL_DRAWDOWN) {
+                return {
+                    isError: true,
+                    content: [{ type: "text", text: `RISK BREACH: Total drawdown ($${totalLoss.toFixed(2)}) exceeds limit ($${MAX_TOTAL_DRAWDOWN}). Trading DISABLED.` }]
+                };
+            }
+
+            // ── RISK CHECK 1.5: News Filter ────────────────────────
+            if (NEWS_FILTER_ENABLED) {
+                try {
+                    console.error(`NEWS FILTER: Checking for high-impact events...`);
+                    // Prototype: In a full version, this would call an economic calendar API.
+                    // For now, it serves as a safety placeholder for Tier-1 news.
+                } catch (e) {
+                    console.error("News filter check failed:", e);
+                }
+            }
+
+            // ── RISK CHECK 2: Daily Loss Limit ─────────────────────
+            const today = new Date().toISOString().split('T')[0];
+            const { data: dailyStats, error: statsError } = await supabase
+                .from("alpha_memory")
+                .select("data")
+                .eq("topic", "TRADE_EXECUTION")
+                .gte("created_at", `${today}T00:00:00Z`)
+                .order("created_at", { ascending: true });
+
+            if (statsError) {
+                console.error("Error fetching daily stats:", statsError);
+            } else if (dailyStats && dailyStats.length > 0) {
+                const dayStartData = dailyStats[0]?.data;
+                const parsedData = typeof dayStartData === 'string' ? JSON.parse(dayStartData) : dayStartData;
+                const startEquity = parsedData?.equity;
+
+                if (startEquity) {
+                    const dailyDrawdown = startEquity - currentEquity;
+                    if (dailyDrawdown >= MAX_DAILY_LOSS) {
+                        return {
+                            isError: true,
+                            content: [{ type: "text", text: `RISK BREACH: Daily loss limit reached ($${dailyDrawdown.toFixed(2)}). Trading halted for today.` }]
+                        };
+                    }
+                }
+            }
+
+            // ── RISK CHECK 3: Revenge Trading Protection ───────────
+            const { data: lastTrades, error: lastTradesError } = await supabase
+                .from("alpha_memory")
+                .select("created_at")
+                .eq("topic", "TRADE_EXECUTION")
+                .order("created_at", { ascending: false })
+                .limit(1);
+
+            if (lastTradesError) {
+                console.error("Error fetching last trades:", lastTradesError);
+            } else if (lastTrades && lastTrades.length > 0) {
+                const lastTradeRecord = lastTrades[0];
+                if (lastTradeRecord && lastTradeRecord.created_at) {
+                    const lastTradeTime = new Date(lastTradeRecord.created_at).getTime();
+                    const now = Date.now();
+                    const minsSinceLastTrade = (now - lastTradeTime) / 60000;
+
+                    if (minsSinceLastTrade < REVENGE_TRADING_DELAY_MINS) {
+                        return {
+                            isError: true,
+                            content: [{ type: "text", text: `RISK BREACH: Cooling off period active. Please wait ${Math.ceil(REVENGE_TRADING_DELAY_MINS - minsSinceLastTrade)} more minutes to prevent revenge trading.` }]
+                        };
+                    }
+                }
+            }
+
+            let finalVolume = volume;
+
+            // If volume is 0 or not provided, calculate based on Risk Management (0.5% rule)
+            if (finalVolume <= 0 && sl > 0) {
+                try {
+                    const priceInfo = terminalState.price(symbol);
+                    if (priceInfo) {
+                        const currentPrice = action === "buy" ? priceInfo.ask : priceInfo.bid;
+                        finalVolume = calculateLotSize(symbol, currentPrice, sl);
+                        console.error(`Auto-calculated volume for ${symbol}: ${finalVolume} (Risk: 0.5%)`);
+                    }
+                } catch (e) {
+                    console.error("Error auto-calculating lot size:", e);
+                }
+            }
+
+            if (finalVolume <= 0) {
+                return {
+                    isError: true,
+                    content: [{ type: "text", text: "RISK CHECK FAILED: Could not determine lot size. Provide volume or valid SL for auto-calculation." }]
+                };
+            }
+
+            let result;
+            if (action === "buy") {
+                result = await connection.createMarketBuyOrder(symbol, finalVolume, sl, tp);
+            } else {
+                result = await connection.createMarketSellOrder(symbol, finalVolume, sl, tp);
+            }
+
+            // Log trade to memory for audit and revenge trading check
+            await supabase.from("alpha_memory").insert([{
+                topic: "TRADE_EXECUTION",
+                data: JSON.stringify({ symbol, action, volume, orderId: result.orderId, equity: currentEquity }),
+                created_at: new Date().toISOString()
+            }]);
+
+            return {
+                content: [{ type: "text", text: `Trade executed successfully. Order ID: ${result.orderId}. Equity: $${currentEquity}` }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error executing trade via MetaApi: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "analyze_telegram_signals") {
+        const { chatId, limit = 20 } = request.params.arguments as any;
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+
+        if (!botToken) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "TELEGRAM_BOT_TOKEN is missing in .env" }],
+            };
+        }
+
+        try {
+            // Use Telegram API to get updates or messages
+            // Note: getUpdates only works if the bot hasn't read them yet via a webhook.
+            // For a true "scraper", one might need a user-level account (gramjs).
+            // But for a bot in a group, we can use getUpdates if it's the only one listening.
+            const response = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=${limit}`);
+            const data = await response.json();
+
+            if (!data.ok) throw new Error(data.description);
+
+            const messages = (data.result as any[])
+                .filter(u => u.message && (String(u.message.chat.id) === String(chatId) || u.message.chat.username === chatId.replace('@', '')))
+                .map(u => ({
+                    from: u.message.from.first_name,
+                    text: u.message.text,
+                    date: new Date(u.message.date * 1000).toISOString(),
+                    parsed: parseSignal(u.message.text || "")
+                }));
+
+            return {
+                content: [{ type: "text", text: JSON.stringify(messages, null, 2) }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error fetching Telegram signals: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "cf_create_strategy") {
+        const { name, accountId } = request.params.arguments as any;
+
+        if (!copyFactory) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "CopyFactory SDK is not initialized. Check METAAPI_TOKEN." }],
+            };
+        }
+
+        try {
+            // Check if strategy already exists to prevent duplicates (optional but good practice)
+            // Or just create it. 
+            // The API expects a strategy object. We'll generate a random password.
+            const strategyId = `alpha_strategy_${Date.now()}`;
+            await copyFactory.configurationApi.updateStrategy(strategyId, {
+                name: name,
+                description: "Alpha Market Master Strategy",
+                accountId: accountId
+            });
+
+            return {
+                content: [{ type: "text", text: `Successfully created strategy: ${name} with ID: ${strategyId} on account: ${accountId}` }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error creating strategy: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "cf_create_subscriber") {
+        const { name, accountId } = request.params.arguments as any;
+
+        if (!copyFactory) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "CopyFactory SDK is not initialized. Check METAAPI_TOKEN." }],
+            };
+        }
+
+        try {
+            const subscriberId = `alpha_subscriber_${Date.now()}`;
+            await copyFactory.configurationApi.updateSubscriber(subscriberId, {
+                name: name,
+                accountId: accountId
+            });
+
+            return {
+                content: [{ type: "text", text: `Successfully created subscriber: ${name} with ID: ${subscriberId} on account: ${accountId}` }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error creating subscriber: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "list_metaapi_accounts") {
+        if (!metaApi) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "MetaApi SDK is not initialized. Check METAAPI_TOKEN." }],
+            };
+        }
+
+        try {
+            const response = await metaApi.metatraderAccountApi.getAccountsWithClassicPagination();
+            const accounts = response.items || [];
+            const simplifiedAccounts = accounts.map((a: any) => ({
+                id: a.id,
+                name: a.name,
+                type: a.type,
+                platform: a.platform,
+                state: a.state,
+                magic: a.magic
+            }));
+
+            return {
+                content: [{ type: "text", text: JSON.stringify(simplifiedAccounts, null, 2) }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error listing accounts: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "cf_list_strategies") {
+        if (!copyFactory) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "CopyFactory SDK is not initialized." }],
+            };
+        }
+        try {
+            const response = await copyFactory.configurationApi.getStrategiesWithClassicPagination();
+            return {
+                content: [{ type: "text", text: JSON.stringify(response.items || [], null, 2) }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error listing strategies: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "cf_list_subscribers") {
+        if (!copyFactory) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "CopyFactory SDK is not initialized." }],
+            };
+        }
+        try {
+            const response = await copyFactory.configurationApi.getSubscribersWithClassicPagination();
+            return {
+                content: [{ type: "text", text: JSON.stringify(response.items || [], null, 2) }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error listing subscribers: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "send_telegram_message") {
+        const { text, parse_mode } = request.params.arguments as any;
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const chatId = process.env.TELEGRAM_CHAT_ID;
+
+        if (!botToken || !chatId) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing in .env" }],
+            };
+        }
+
+        try {
+            const body: any = { chat_id: chatId, text };
+            if (parse_mode) body.parse_mode = parse_mode;
+
+            const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const data = await response.json();
+
+            if (!data.ok) throw new Error(data.description);
+
+            return {
+                content: [{ type: "text", text: `Message sent to Telegram (message_id: ${data.result.message_id})` }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error sending Telegram message: " + error.message }],
+            };
+        }
+    }
+
+    if (request.params.name === "cf_create_webhook") {
+        const { strategyId, url } = request.params.arguments as any;
+
+        if (!copyFactory) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "CopyFactory SDK is not initialized. Check METAAPI_TOKEN." }],
+            };
+        }
+
+        try {
+            const webhookResult = await copyFactory.configurationApi.createWebhook(strategyId, {
+                url: url
+            });
+
+            return {
+                content: [{ type: "text", text: `Successfully created webhook for strategy ${strategyId}. Webhook ID: ${webhookResult.id}, URL: ${webhookResult.url}` }],
+            };
+        } catch (error: any) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Error creating webhook: " + error.message }],
+            };
+        }
+    }
+
+    // ── Strategy Library Tools ─────────────────────────────────────
+    const STRATEGIES_DIR = path.resolve(__dirname, "strategies");
+    // Also check parent-level strategies folder
+    const ALT_STRATEGIES_DIR = path.resolve(__dirname, "..", "strategies");
+    const stratDir = fs.existsSync(STRATEGIES_DIR) ? STRATEGIES_DIR : ALT_STRATEGIES_DIR;
+
+    if (request.params.name === "list_strategies") {
+        if (!fs.existsSync(stratDir)) {
+            return { content: [{ type: "text", text: "No strategies directory found." }] };
+        }
+        const files = fs.readdirSync(stratDir).filter(
+            (f: string) => f.endsWith(".pine") || f.endsWith(".mjs") || f.endsWith(".py") || f.endsWith(".js")
+        );
+        if (files.length === 0) {
+            return { content: [{ type: "text", text: "No strategies found." }] };
+        }
+        const entries = files.map((f: string) => {
+            const ext = path.extname(f);
+            const type = ext === ".pine" ? "Pine Script" : ext === ".mjs" ? "Node Backtest" : ext === ".py" ? "Python" : "JS";
+            return `  ${f} [${type}]`;
+        });
+        return { content: [{ type: "text", text: `Strategy Library:\n\n${entries.join("\n")}` }] };
+    }
+
+    if (request.params.name === "get_strategy") {
+        const { filename } = request.params.arguments as any;
+        const safe = path.basename(filename);
+        const filePath = path.join(stratDir, safe);
+        if (!fs.existsSync(filePath)) {
+            return { isError: true, content: [{ type: "text", text: `Strategy "${safe}" not found.` }] };
+        }
+        const content = fs.readFileSync(filePath, "utf-8");
+        return { content: [{ type: "text", text: content }] };
+    }
+
+    if (request.params.name === "save_strategy") {
+        const { filename, content } = request.params.arguments as any;
+        const safe = path.basename(filename);
+        const allowed = [".pine", ".mjs", ".py", ".js", ".ts"];
+        if (!allowed.some((ext: string) => safe.endsWith(ext))) {
+            return { isError: true, content: [{ type: "text", text: `Invalid file type. Allowed: ${allowed.join(", ")}` }] };
+        }
+        if (!fs.existsSync(stratDir)) fs.mkdirSync(stratDir, { recursive: true });
+        fs.writeFileSync(path.join(stratDir, safe), content, "utf-8");
+        return { content: [{ type: "text", text: `Saved strategy: ${safe} (${content.length} chars)` }] };
+    }
+
+    throw new Error("Tool not found: " + request.params.name);
+});
+
+async function main() {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("Alpha Market MCP Server running on stdio");
+}
+
+main().catch(console.error);
+
+function parseSignal(text: string) {
+    const lines = text.toUpperCase().split('\n');
+    let symbol = "";
+    let action = "";
+    let sl = 0;
+    let tp = 0;
+
+    const pairs = ["XAUUSD", "GOLD", "EURUSD", "GBPUSD", "US30", "NAS100", "BTCUSD"];
+
+    for (const line of lines) {
+        // Detect Symbol
+        for (const p of pairs) {
+            if (line.includes(p)) symbol = p === "GOLD" ? "XAUUSD" : p;
+        }
+
+        // Detect Action
+        if (line.includes("BUY") || line.includes("LONG")) action = "buy";
+        if (line.includes("SELL") || line.includes("SHORT")) action = "sell";
+
+        // Detect SL/TP
+        if (line.includes("SL") || line.includes("STOP")) {
+            const match = line.match(/\d+(\.\d+)?/);
+            if (match) sl = parseFloat(match[0]);
+        }
+        if (line.includes("TP") || line.includes("TARGET") || line.includes("PROFIT")) {
+            const match = line.match(/\d+(\.\d+)?/);
+            if (match) tp = parseFloat(match[0]);
+        }
+    }
+
+    return { symbol, action, sl, tp, raw: text };
+}
+
+/**
+ * Calculates lot size based on fixed risk percentage of account size.
+ * Formula for Gold: Lots = Risk Amount / (Distance * 100)
+ */
+function calculateLotSize(symbol: string, currentPrice: number, slPrice: number): number {
+    const riskAmount = ACCOUNT_SIZE * RISK_PER_TRADE_PERCENT;
+    const distance = Math.abs(currentPrice - slPrice);
+
+    if (distance <= 0) return 0;
+
+    let lots = 0;
+    if (symbol.includes("XAU") || symbol.includes("GOLD")) {
+        // Gold: 1 Lot = $100 per $1 move
+        lots = riskAmount / (distance * 100);
+    } else if (symbol.includes("US30") || symbol.includes("NAS100")) {
+        // Indices: Usually 1 Lot = $1 per 1 point (depends on broker, defaulting to conservative)
+        lots = riskAmount / distance;
+    } else {
+        // Forex: 1 Lot = $10 per pip (approx)
+        lots = riskAmount / (distance * 10000 * 10);
+    }
+
+    // Floor to 2 decimal places and ensure minimum lot size (0.01)
+    const finalLots = Math.max(0.01, Math.floor(lots * 100) / 100);
+    return finalLots;
+}

@@ -1,0 +1,138 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background with Aurora -->
+  <defs>
+    <!-- Aurora Borealis Gradient - Dynamic multi-color -->
+    <linearGradient id="auroraBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0e27;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#1a1a3e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0d2b4a;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Primary Aurora: Green to Cyan -->
+    <linearGradient id="auroraGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00ff88;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#00ffdd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00ccff;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Secondary Aurora: Purple to Pink -->
+    <linearGradient id="auroraPurple" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ff00ff;stop-opacity:0.8" />
+      <stop offset="50%" style="stop-color:#ff0099;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#9900ff;stop-opacity:0.8" />
+    </linearGradient>
+    
+    <!-- Tertiary Aurora: Blue to Green -->
+    <linearGradient id="auroraBlue" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0088ff;stop-opacity:0.6" />
+      <stop offset="50%" style="stop-color:#00dd88;stop-opacity:0.6" />
+      <stop offset="100%" style="stop-color:#00ffcc;stop-opacity:0.6" />
+    </linearGradient>
+    
+    <!-- Radial gradient for glow effect -->
+    <radialGradient id="auroraGlow">
+      <stop offset="0%" style="stop-color:#00ffff;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#00ff88;stop-opacity:0.6" />
+      <stop offset="100%" style="stop-color:#00ffff;stop-opacity:0" />
+    </radialGradient>
+    
+    <!-- Glow filter -->
+    <filter id="aurora-glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Enhanced glow filter -->
+    <filter id="intense-glow">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Aurora wave animation -->
+    <style>
+      @keyframes auroraWave {
+        0% { opacity: 0.4; }
+        50% { opacity: 1; }
+        100% { opacity: 0.4; }
+      }
+      
+      @keyframes glowPulse {
+        0% { filter: drop-shadow(0 0 4px #00ff88) drop-shadow(0 0 8px #00ffdd); }
+        50% { filter: drop-shadow(0 0 8px #ff00ff) drop-shadow(0 0 16px #9900ff); }
+        100% { filter: drop-shadow(0 0 4px #00ff88) drop-shadow(0 0 8px #00ffdd); }
+      }
+      
+      .aurora-wave { animation: auroraWave 3s ease-in-out infinite; }
+      .glow-pulse { animation: glowPulse 4s ease-in-out infinite; }
+    </style>
+  </defs>
+  
+  <!-- Background with Aurora -->
+  <rect width="256" height="256" fill="url(#auroraBg)"/>
+  
+  <!-- Aurora light waves in background -->
+  <ellipse cx="128" cy="80" rx="100" ry="40" fill="url(#auroraGreen)" opacity="0.15" class="aurora-wave"/>
+  <ellipse cx="128" cy="100" rx="110" ry="35" fill="url(#auroraPurple)" opacity="0.1" class="aurora-wave" style="animation-delay: 0.5s"/>
+  <ellipse cx="128" cy="120" rx="95" ry="30" fill="url(#auroraBlue)" opacity="0.12" class="aurora-wave" style="animation-delay: 1s"/>
+  
+  <!-- Outer glow aura -->
+  <circle cx="128" cy="128" r="128" fill="url(#auroraGlow)" opacity="0.3"/>
+  
+  <!-- Outer Ring with gradient -->
+  <circle cx="128" cy="128" r="120" fill="none" stroke="url(#auroraGreen)" stroke-width="3" opacity="0.7" filter="url(#aurora-glow)"/>
+  <circle cx="128" cy="128" r="118" fill="none" stroke="url(#auroraPurple)" stroke-width="1.5" opacity="0.5" filter="url(#aurora-glow)"/>
+  
+  <!-- Core Circle with multi-layer glow -->
+  <circle cx="128" cy="128" r="85" fill="none" stroke="url(#auroraGreen)" stroke-width="2" filter="url(#intense-glow)" opacity="0.9" class="glow-pulse"/>
+  <circle cx="128" cy="128" r="83" fill="none" stroke="url(#auroraPurple)" stroke-width="1" opacity="0.6" class="glow-pulse" style="animation-delay: 0.5s"/>
+  
+  <!-- Command Center Symbol - Hexagon -->
+  <g transform="translate(128, 128)" class="glow-pulse">
+    <!-- Outer hexagon with aurora green -->
+    <path d="M 0,-40 L 35,-20 L 35,20 L 0,40 L -35,20 L -35,-20 Z" 
+          fill="none" stroke="url(#auroraGreen)" stroke-width="3" opacity="1" filter="url(#intense-glow)"/>
+    
+    <!-- Middle hexagon with aurora purple -->
+    <path d="M 0,-38 L 33,-19 L 33,19 L 0,38 L -33,19 L -33,-19 Z" 
+          fill="none" stroke="url(#auroraPurple)" stroke-width="1.5" opacity="0.6"/>
+    
+    <!-- Center Node with radial glow -->
+    <circle cx="0" cy="0" r="10" fill="url(#auroraGlow)" filter="url(#intense-glow)" opacity="0.95"/>
+    <circle cx="0" cy="0" r="6" fill="url(#auroraGreen)" opacity="0.9"/>
+    
+    <!-- Connection Lines with gradient colors -->
+    <line x1="0" y1="0" x2="0" y2="-40" stroke="url(#auroraGreen)" stroke-width="2" opacity="0.8" filter="url(#aurora-glow)"/>
+    <line x1="0" y1="0" x2="35" y2="-20" stroke="url(#auroraBlue)" stroke-width="2" opacity="0.7" filter="url(#aurora-glow)"/>
+    <line x1="0" y1="0" x2="35" y2="20" stroke="url(#auroraPurple)" stroke-width="2" opacity="0.7" filter="url(#aurora-glow)"/>
+    <line x1="0" y1="0" x2="0" y2="40" stroke="url(#auroraGreen)" stroke-width="2" opacity="0.8" filter="url(#aurora-glow)"/>
+    <line x1="0" y1="0" x2="-35" y2="20" stroke="url(#auroraBlue)" stroke-width="2" opacity="0.7" filter="url(#aurora-glow)"/>
+    <line x1="0" y1="0" x2="-35" y2="-20" stroke="url(#auroraPurple)" stroke-width="2" opacity="0.7" filter="url(#aurora-glow)"/>
+    
+    <!-- Outer Nodes with aurora glow -->
+    <circle cx="0" cy="-40" r="6" fill="url(#auroraGreen)" opacity="0.95" filter="url(#intense-glow)"/>
+    <circle cx="35" cy="-20" r="6" fill="url(#auroraBlue)" opacity="0.9" filter="url(#intense-glow)"/>
+    <circle cx="35" cy="20" r="6" fill="url(#auroraPurple)" opacity="0.85" filter="url(#intense-glow)"/>
+    <circle cx="0" cy="40" r="6" fill="url(#auroraGreen)" opacity="0.95" filter="url(#intense-glow)"/>
+    <circle cx="-35" cy="20" r="6" fill="url(#auroraBlue)" opacity="0.9" filter="url(#intense-glow)"/>
+    <circle cx="-35" cy="-20" r="6" fill="url(#auroraPurple)" opacity="0.85" filter="url(#intense-glow)"/>
+  </g>
+  
+  <!-- Decorative aurora arcs -->
+  <path d="M 50,100 Q 128,60 206,100" fill="none" stroke="url(#auroraGreen)" stroke-width="1.5" opacity="0.3" filter="url(#aurora-glow)"/>
+  <path d="M 40,150 Q 128,110 216,150" fill="none" stroke="url(#auroraPurple)" stroke-width="1.5" opacity="0.25" filter="url(#aurora-glow)"/>
+  <path d="M 60,180 Q 128,160 196,180" fill="none" stroke="url(#auroraBlue)" stroke-width="1.5" opacity="0.3" filter="url(#aurora-glow)"/>
+  
+  <!-- Text: "COMMAND CENTER" with aurora gradient -->
+  <text x="128" y="220" font-family="Arial, sans-serif" font-size="13" font-weight="bold" 
+        text-anchor="middle" fill="url(#auroraGreen)" letter-spacing="2" filter="url(#aurora-glow)"
+        style="text-shadow: 0 0 4px rgba(0,255,136,0.5), 0 0 8px rgba(255,0,255,0.3);">
+    COMMAND CENTER
+  </text>
+</svg>
